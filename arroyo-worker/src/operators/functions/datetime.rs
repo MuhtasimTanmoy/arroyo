@@ -77,6 +77,7 @@ pub fn date_part(part: DatePart, argument: SystemTime) -> u32 {
 mod test {
     use super::*;
     use arroyo_types::{DatePart, DateTruncPrecision};
+    use chrono::TimeZone;
     use lazy_static::lazy_static;
     use std::{collections::HashMap, time::SystemTime};
 
@@ -122,7 +123,7 @@ mod test {
             let observed: DateTime<Utc> = date_trunc(*key, *REFERENCE_DATETIME).into();
             let date_fixed_offset =
                 DateTime::parse_from_rfc3339(value).expect("Failed to parse date and time");
-            let expected: DateTime<Utc> = DateTime::from_utc(date_fixed_offset.naive_utc(), Utc);
+            let expected: DateTime<Utc> = Utc.from_utc_datetime(&date_fixed_offset.naive_utc());
             assert_eq!(observed, expected, "Wrong result for {:?} ", key)
         }
     }

@@ -18,6 +18,7 @@ use tables::{
 };
 use tokio::sync::mpsc::Sender;
 
+pub mod judy;
 pub mod parquet;
 pub mod tables;
 

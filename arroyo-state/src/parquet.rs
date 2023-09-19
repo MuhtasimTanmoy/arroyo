@@ -1,3 +1,4 @@
+use crate::judy::JudyWriter;
 use crate::{hash_key, BackingStore, BINCODE_CONFIG};
 use anyhow::{Context, Result};
 use arrow_array::RecordBatch;
@@ -516,6 +517,7 @@ impl ParquetWriter {
                 .map(|table| (table.name.chars().next().unwrap(), table.clone()))
                 .collect(),
             builders: HashMap::new(),
+            judy_builder: HashMap::new(),
             current_files,
         })
         .start();
@@ -698,6 +700,7 @@ struct ParquetFlusher {
     task_info: TaskInfo,
     table_descriptors: HashMap<char, TableDescriptor>,
     builders: HashMap<char, RecordBatchBuilder>,
+    judy_builder: HashMap<char, BTreeMap<Vec<u8>, Vec<(SystemTime, Vec<u8>)>>>,
     current_files: HashMap<char, BTreeMap<u32, Vec<ParquetStoreData>>>,
 }
 
@@ -738,6 +741,7 @@ impl ParquetFlusher {
                 op = self.queue.recv() => {
                     match op {
                         Some(ParquetQueueItem::Write( ParquetWrite{table, key_hash, timestamp, key, data})) => {
+                            self.judy_builder.entry(table).or_default().entry(key.clone()).or_default().push((timestamp.clone(), data.clone()));
                             self.builders.entry(table).or_default().insert(key_hash, timestamp, key, data);
                         }
                         Some(ParquetQueueItem::Checkpoint(epoch)) => {
@@ -763,6 +767,40 @@ impl ParquetFlusher {
                 };
                 let s3_key = table_checkpoint_path(&self.task_info, table, cp.epoch);
                 to_write.push((record_batch, s3_key, table, stats));
+            }
+
+            for (table, judy_builder) in self.judy_builder.drain() {
+                let path = format!(
+                    "{}-{}",
+                    table_checkpoint_path(&self.task_info, table, cp.epoch),
+                    "judy"
+                );
+                //create checkpoint folder
+                let checkpoint_folder = operator_path(
+                    &self.task_info.job_id,
+                    cp.epoch,
+                    &self.task_info.operator_id,
+                );
+                warn!("writing to checkpoint folder {}", checkpoint_folder);
+                tokio::fs::create_dir_all(checkpoint_folder)
+                    .await
+                    .context("creating checkpoint folder")?;
+
+                let mut judy = tokio::fs::File::create(path)
+                    .await
+                    .context("creating values file")?;
+                let mut judy_writer = JudyWriter::new();
+                let mut count = 0;
+                for (key, values) in judy_builder {
+                    count += 1;
+                    if count == 200_000 {
+                        println!("200,000th key is {:?}", key);
+                    }
+                    judy_writer
+                        .insert(&key, &bincode::encode_to_vec(&values, config::standard())?)
+                        .await?;
+                }
+                judy_writer.serialize(&mut judy).await?;
             }
 
             for (record_batch, s3_key, table, stats) in to_write {

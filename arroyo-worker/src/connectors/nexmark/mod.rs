@@ -536,7 +536,9 @@ impl GeneratorConfig {
         //     futureAuction - timestamp, numEventsForAuctions);
         // Choose a length with average horizonMs.
         let horizon = future_auction.duration_since(timestamp).unwrap();
-        Duration::from_millis(1 + u64::max(random.gen_range(0..horizon.as_millis() as u64 * 2), 1))
+        Duration::from_nanos(
+            1 + u64::max(random.gen_range(0..=(1 + horizon.as_nanos() as u64 * 2)), 1),
+        )
     }
 
     fn next_person(
