@@ -21,11 +21,16 @@ use tokio::{sync::mpsc::Receiver, task::JoinHandle};
 use tonic::{transport::Channel, Request};
 use tracing::{error, info, warn};
 
+use crate::job_controller::checkpoint_state::CheckpointState;
+use crate::job_controller::comitting_state::CommittingState;
 use crate::{queries::controller_queries, JobConfig, JobMessage, RunningMessage};
 
-use self::checkpointer::{CheckpointState, CheckpointingOrCommittingState, CommittingState};
+use self::checkpointer::CheckpointingOrCommittingState;
 
+pub mod checkpoint_state;
 mod checkpointer;
+mod comitting_state;
+mod subtask_state;
 
 const CHECKPOINTS_TO_KEEP: u32 = 4;
 const COMPACT_EVERY: u32 = 2;
@@ -336,7 +341,7 @@ impl RunningJobModel {
                         .as_secs_f32();
                     // shortcut if committing is unnecessary
                     if committing_state.done() {
-                        checkpointing.finish(pool).await?;
+                        checkpointing.finish(Some(pool)).await?;
                         self.last_checkpoint = Instant::now();
                         self.checkpoint_state = None;
                         self.compact_state().await?;
